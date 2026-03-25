@@ -1,0 +1,349 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+JAVAENV_JAVA_DIR="${HOME}/.local/share/java"
+JAVAENV_SHIM_DIR="${HOME}/.local/bin"
+
+# Executables to shim (union of bin/ contents across JDK 17, 21, 25)
+SHIM_EXECUTABLES=(
+  java javac javadoc javap jar jarsigner
+  jcmd jconsole jdb jdeprscan jdeps jfr
+  jhsdb jimage jinfo jlink jmap jmod
+  jpackage jps jrunscript jshell jstack
+  jstat jstatd keytool rmiregistry serialver
+)
+
+resolve_version() {
+  if [[ -f ".javaversion" ]]; then
+    cat ".javaversion"
+  elif [[ -f "${HOME}/.javaversion" ]]; then
+    cat "${HOME}/.javaversion"
+  else
+    echo ""
+  fi
+}
+
+detect_os() {
+  local uname_s
+  uname_s="$(uname -s)"
+  case "${uname_s}" in
+    Linux*)  echo "linux" ;;
+    Darwin*) echo "mac" ;;
+    *)       echo "Unsupported OS: ${uname_s}" >&2; exit 1 ;;
+  esac
+}
+
+detect_arch() {
+  local uname_m
+  uname_m="$(uname -m)"
+  case "${uname_m}" in
+    x86_64)       echo "x64" ;;
+    amd64)        echo "x64" ;;
+    aarch64)      echo "aarch64" ;;
+    arm64)        echo "aarch64" ;;
+    *)            echo "Unsupported architecture: ${uname_m}" >&2; exit 1 ;;
+  esac
+}
+
+cmd_install_list() {
+  local os arch
+  os="$(detect_os)"
+  arch="$(detect_arch)"
+
+  echo "Available JDK versions from Adoptium (${os}/${arch}):"
+  echo ""
+
+  local api_url="https://api.adoptium.net/v3/info/release_versions?page_size=50&release_type=ga&vendor=eclipse&os=${os}&architecture=${arch}&image_type=jdk&sort_order=DESC"
+  local json
+  if ! json="$(curl -fsSL "${api_url}")"; then
+    echo "Error: Failed to query Adoptium API" >&2
+    exit 1
+  fi
+
+  # Parse JSON with sed/awk — no python3 or jq dependency
+  # JSON field order is: build, major, minor, openjdk_version, optional, security, semver
+  local lts_versions=" 8 11 17 21 25 "
+  local current_major="" prev_version=""
+
+  echo "${json}" \
+    | tr -d ' \n' \
+    | sed 's/{"build"/\n{"build"/g' \
+    | grep '"build"' \
+    | sed 's/.*"build":\([0-9]*\),.*"major":\([0-9]*\),"minor":\([0-9]*\),.*"security":\([0-9]*\).*/\1 \2 \3 \4/' \
+    | while read -r build major minor security; do
+        local version="${major}.${minor}.${security}+${build}"
+        # Skip duplicates
+        if [[ "${version}" == "${prev_version}" ]]; then
+          continue
+        fi
+        prev_version="${version}"
+
+        if [[ "${major}" != "${current_major}" ]]; then
+          if [[ -n "${current_major}" ]]; then
+            echo ""
+          fi
+          if [[ "${lts_versions}" == *" ${major} "* ]]; then
+            echo "JDK ${major} (LTS):"
+          else
+            echo "JDK ${major}:"
+          fi
+          current_major="${major}"
+        fi
+        echo "  ${version}"
+      done
+}
+
+cmd_install() {
+  local version="$1"
+  local os arch release_name url dest tmp_dir archive_ext
+
+  os="$(detect_os)"
+  arch="$(detect_arch)"
+  release_name="jdk-${version}"
+  dest="${JAVAENV_JAVA_DIR}/${version}"
+
+  if [[ -d "${dest}" ]]; then
+    echo "JDK ${version} is already installed at ${dest}"
+    return 0
+  fi
+
+  if [[ "${os}" == "mac" ]]; then
+    archive_ext="tar.gz"
+  else
+    archive_ext="tar.gz"
+  fi
+
+  url="https://api.adoptium.net/v3/binary/version/${release_name}/${os}/${arch}/jdk/hotspot/normal/eclipse?project=jdk"
+
+  echo "Downloading JDK ${version} for ${os}/${arch}..."
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "${tmp_dir}"' EXIT
+
+  local archive="${tmp_dir}/jdk.${archive_ext}"
+  if ! curl -fSL -o "${archive}" "${url}"; then
+    echo "Error: Failed to download JDK ${version}" >&2
+    echo "URL: ${url}" >&2
+    exit 1
+  fi
+
+  echo "Extracting..."
+  mkdir -p "${dest}"
+  tar xzf "${archive}" -C "${tmp_dir}"
+
+  # Adoptium tarballs extract to a directory like jdk-17.0.18+8 or jdk-17.0.18+8/Contents/Home on macOS
+  local extracted_dir
+  extracted_dir="$(find "${tmp_dir}" -maxdepth 1 -type d -name 'jdk-*' | head -1)"
+
+  if [[ -z "${extracted_dir}" ]]; then
+    echo "Error: Could not find extracted JDK directory" >&2
+    exit 1
+  fi
+
+  # On macOS, the JDK is nested under Contents/Home
+  if [[ "${os}" == "mac" && -d "${extracted_dir}/Contents/Home" ]]; then
+    cp -a "${extracted_dir}/Contents/Home/." "${dest}/"
+  else
+    cp -a "${extracted_dir}/." "${dest}/"
+  fi
+
+  echo "Installed JDK ${version} to ${dest}"
+  trap - EXIT
+  rm -rf "${tmp_dir}"
+}
+
+cmd_uninstall() {
+  local version="$1"
+  local dest="${JAVAENV_JAVA_DIR}/${version}"
+
+  if [[ ! -d "${dest}" ]]; then
+    echo "JDK ${version} is not installed" >&2
+    exit 1
+  fi
+
+  rm -rf "${dest}"
+  echo "Uninstalled JDK ${version}"
+}
+
+cmd_versions() {
+  if [[ ! -d "${JAVAENV_JAVA_DIR}" ]]; then
+    echo "No JDK versions installed"
+    return 0
+  fi
+
+  local current
+  current="$(resolve_version)"
+
+  for dir in "${JAVAENV_JAVA_DIR}"/*/; do
+    [[ -d "${dir}" ]] || continue
+    local v
+    v="$(basename "${dir}")"
+    if [[ "${v}" == "${current}" ]]; then
+      echo "* ${v}"
+    else
+      echo "  ${v}"
+    fi
+  done
+}
+
+cmd_current() {
+  local version
+  version="$(resolve_version)"
+
+  if [[ -z "${version}" ]]; then
+    echo "No Java version set. Create .javaversion or ~/.javaversion" >&2
+    exit 1
+  fi
+
+  local dest="${JAVAENV_JAVA_DIR}/${version}"
+  if [[ ! -d "${dest}" ]]; then
+    echo "JDK ${version} is not installed. Run: javaenv install ${version}" >&2
+    exit 1
+  fi
+
+  echo "${version}"
+}
+
+cmd_home() {
+  local version
+  version="$(resolve_version)"
+
+  if [[ -z "${version}" ]]; then
+    echo "No Java version set. Create .javaversion or ~/.javaversion" >&2
+    exit 1
+  fi
+
+  echo "${JAVAENV_JAVA_DIR}/${version}"
+}
+
+cmd_reshim() {
+  mkdir -p "${JAVAENV_SHIM_DIR}"
+
+  for exe in "${SHIM_EXECUTABLES[@]}"; do
+    local shim_path="${JAVAENV_SHIM_DIR}/${exe}"
+
+    # Don't overwrite non-shim files
+    if [[ -f "${shim_path}" && ! -L "${shim_path}" ]]; then
+      if ! head -2 "${shim_path}" | grep -q "javaenv shim"; then
+        echo "Skipping ${exe}: ${shim_path} exists and is not a javaenv shim" >&2
+        continue
+      fi
+    fi
+
+    cat > "${shim_path}" <<'SHIM'
+#!/usr/bin/env bash
+# javaenv shim
+set -euo pipefail
+
+JAVAENV_JAVA_DIR="${HOME}/.local/share/java"
+
+resolve_version() {
+  local dir="$PWD"
+  while [[ "${dir}" != "" ]]; do
+    if [[ -f "${dir}/.javaversion" ]]; then
+      cat "${dir}/.javaversion"
+      return
+    fi
+    dir="${dir%/*}"
+  done
+  if [[ -f "${HOME}/.javaversion" ]]; then
+    cat "${HOME}/.javaversion"
+  fi
+}
+
+version="$(resolve_version)"
+if [[ -z "${version}" ]]; then
+  echo "javaenv: no .javaversion file found in directory hierarchy or ~/.javaversion" >&2
+  exit 1
+fi
+
+version="$(echo "${version}" | tr -d '[:space:]')"
+exe_name="$(basename "$0")"
+exe_path="${JAVAENV_JAVA_DIR}/${version}/bin/${exe_name}"
+
+if [[ ! -x "${exe_path}" ]]; then
+  echo "javaenv: ${exe_name} not found for JDK ${version}" >&2
+  echo "Run: javaenv install ${version}" >&2
+  exit 1
+fi
+
+exec "${exe_path}" "$@"
+SHIM
+    chmod +x "${shim_path}"
+  done
+
+  echo "Shims installed to ${JAVAENV_SHIM_DIR}"
+}
+
+usage() {
+  cat <<EOF
+Usage: javaenv <command> [args]
+
+Commands:
+  install <version>     Install a JDK version (e.g., 17.0.18+8)
+  install -l|--list     List available JDK versions from Adoptium
+  uninstall <version>   Remove an installed JDK version
+  versions              List installed JDK versions
+  current               Show the currently active JDK version
+  home                  Print JAVA_HOME for the current version
+  reshim                Regenerate shims in ~/.local/bin
+  help                  Show this help message
+
+Version is resolved from .javaversion in the current directory
+(searching up), falling back to ~/.javaversion.
+EOF
+}
+
+main() {
+  if [[ $# -lt 1 ]]; then
+    usage
+    exit 1
+  fi
+
+  local command="$1"
+  shift
+
+  case "${command}" in
+    install)
+      if [[ $# -lt 1 ]]; then
+        echo "Usage: javaenv install <version>" >&2
+        echo "       javaenv install -l|--list" >&2
+        exit 1
+      fi
+      if [[ "$1" == "-l" || "$1" == "--list" ]]; then
+        cmd_install_list
+      else
+        cmd_install "$1"
+        cmd_reshim
+      fi
+      ;;
+    uninstall)
+      if [[ $# -lt 1 ]]; then
+        echo "Usage: javaenv uninstall <version>" >&2
+        exit 1
+      fi
+      cmd_uninstall "$1"
+      ;;
+    versions)
+      cmd_versions
+      ;;
+    current)
+      cmd_current
+      ;;
+    home)
+      cmd_home
+      ;;
+    reshim)
+      cmd_reshim
+      ;;
+    help|--help|-h)
+      usage
+      ;;
+    *)
+      echo "Unknown command: ${command}" >&2
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

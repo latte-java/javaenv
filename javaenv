@@ -14,7 +14,9 @@ SHIM_EXECUTABLES=(
 )
 
 resolve_version() {
-  if [[ -f ".javaversion" ]]; then
+  if [[ -n "${JAVAENV_VERSION:-}" ]]; then
+    echo "${JAVAENV_VERSION}"
+  elif [[ -f ".javaversion" ]]; then
     cat ".javaversion"
   elif [[ -f "${HOME}/.javaversion" ]]; then
     cat "${HOME}/.javaversion"
@@ -376,6 +378,12 @@ cmd_local() {
   echo "Local Java version set to ${version} ($(pwd)/.javaversion)"
 }
 
+cmd_shell() {
+  local version="$1"
+  validate_version "${version}"
+  echo "${version}"
+}
+
 cmd_init() {
   local shell_name="${1:-}"
 
@@ -388,12 +396,63 @@ cmd_init() {
     bash|zsh)
       cat <<'INIT'
 export JAVA_HOME="$(javaenv home 2>/dev/null)"
+javaenv() {
+  local command="${1:-}"
+  if [[ "${command}" == "shell" ]]; then
+    shift
+    if [[ "${1:-}" == "--unset" ]]; then
+      unset JAVAENV_VERSION
+      echo "Cleared JAVAENV_VERSION"
+    elif [[ -z "${1:-}" ]]; then
+      if [[ -n "${JAVAENV_VERSION:-}" ]]; then
+        echo "${JAVAENV_VERSION}"
+      else
+        echo "No shell version set"
+      fi
+    else
+      JAVAENV_VERSION="$(command javaenv shell "$1")" && export JAVAENV_VERSION
+      export JAVA_HOME="$(command javaenv home 2>/dev/null)"
+    fi
+  else
+    command javaenv "$@"
+    if [[ "${command}" == "global" || "${command}" == "local" ]]; then
+      export JAVA_HOME="$(command javaenv home 2>/dev/null)"
+    fi
+  fi
+}
 INIT
       ;;
     fish)
       cat <<'INIT'
 if set -l jhome (javaenv home 2>/dev/null)
   set -gx JAVA_HOME $jhome
+end
+function javaenv
+  set -l command $argv[1]
+  if test "$command" = "shell"
+    if test (count $argv) -lt 2
+      if set -q JAVAENV_VERSION
+        echo $JAVAENV_VERSION
+      else
+        echo "No shell version set"
+      end
+    else if test "$argv[2]" = "--unset"
+      set -e JAVAENV_VERSION
+      echo "Cleared JAVAENV_VERSION"
+    else
+      set -gx JAVAENV_VERSION (command javaenv shell $argv[2])
+      if set -l jhome (command javaenv home 2>/dev/null)
+        set -gx JAVA_HOME $jhome
+      end
+    end
+  else
+    command javaenv $argv
+    if test "$command" = "global" -o "$command" = "local"
+      if set -l jhome (command javaenv home 2>/dev/null)
+        set -gx JAVA_HOME $jhome
+      end
+    end
+  end
 end
 INIT
       ;;
@@ -426,6 +485,10 @@ set -euo pipefail
 JAVAENV_JAVA_DIR="${HOME}/.local/share/java"
 
 resolve_version() {
+  if [[ -n "${JAVAENV_VERSION:-}" ]]; then
+    echo "${JAVAENV_VERSION}"
+    return
+  fi
   local dir="$PWD"
   while [[ "${dir}" != "" ]]; do
     if [[ -f "${dir}/.javaversion" ]]; then
@@ -526,6 +589,8 @@ Commands:
   uninstall <version>   Remove an installed JDK version
   global <version>      Set the global Java version (~/.javaversion)
   local <version>       Set the local Java version (./.javaversion)
+  shell <version>       Set Java version for the current shell session
+  shell --unset         Clear the shell version override
   init [shell]          Output shell code to set JAVA_HOME (bash/zsh/fish)
   versions              List installed JDK versions
   current               Show the currently active JDK version
@@ -591,6 +656,15 @@ main() {
       ;;
     home)
       cmd_home
+      ;;
+    shell)
+      if [[ $# -lt 1 ]]; then
+        echo "Usage: javaenv shell <version>" >&2
+        echo "       javaenv shell --unset" >&2
+        echo "Note: requires javaenv init in your shell profile" >&2
+        exit 1
+      fi
+      cmd_shell "$1"
       ;;
     init)
       cmd_init "${1:-}"

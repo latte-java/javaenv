@@ -338,6 +338,36 @@ cmd_home() {
   echo "${JAVAENV_JAVA_DIR}/${version}"
 }
 
+cmd_global() {
+  local version="$1"
+
+  # Validate: must be a major version (digits only) or a full version (contains dots)
+  if [[ "${version}" != *.* && ! "${version}" =~ ^[0-9]+$ ]]; then
+    echo "Error: Invalid version '${version}'. Use a major version (e.g., 21) or full version (e.g., 21.0.7+6)" >&2
+    exit 1
+  fi
+
+  # For full versions, verify it's installed
+  if [[ "${version}" == *.* ]]; then
+    local dest="${JAVAENV_JAVA_DIR}/${version}"
+    if [[ ! -d "${dest}" ]]; then
+      echo "JDK ${version} is not installed. Run: javaenv install ${version}" >&2
+      exit 1
+    fi
+  else
+    # For major versions, verify at least one matching version is installed
+    local resolved
+    resolved="$(resolve_major_to_installed "${version}")"
+    if [[ -z "${resolved}" ]]; then
+      echo "No JDK ${version}.x installed. Run: javaenv install ${version}" >&2
+      exit 1
+    fi
+  fi
+
+  echo "${version}" > "${HOME}/.javaversion"
+  echo "Global Java version set to ${version}"
+}
+
 cmd_reshim() {
   mkdir -p "${JAVAENV_SHIM_DIR}"
 
@@ -458,6 +488,7 @@ Commands:
   install <version>     Install a JDK version (e.g., 21 or 21.0.7+6)
   install -l|--list     List available JDK versions from Adoptium
   uninstall <version>   Remove an installed JDK version
+  global <version>      Set the global Java version (~/.javaversion)
   versions              List installed JDK versions
   current               Show the currently active JDK version
   home                  Print JAVA_HOME for the current version
@@ -499,6 +530,13 @@ main() {
         exit 1
       fi
       cmd_uninstall "$1"
+      ;;
+    global)
+      if [[ $# -lt 1 ]]; then
+        echo "Usage: javaenv global <version>" >&2
+        exit 1
+      fi
+      cmd_global "$1"
       ;;
     versions)
       cmd_versions

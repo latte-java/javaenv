@@ -75,7 +75,6 @@ resolve_latest_major() {
 resolve_major_to_installed() {
   local major="$1"
   local best=""
-  local best_parts=()
 
   for dir in "${JAVAENV_JAVA_DIR}"/*/; do
     [[ -d "${dir}" ]] || continue
@@ -100,7 +99,7 @@ resolve_major_to_installed() {
     # Split both versions on . and + for numeric comparison
     local IFS='.+'
     local -a cur_parts=(${ver})
-    local -a best_ver="${best#"${best%%[0-9]*}"}"
+    local best_ver="${best#"${best%%[0-9]*}"}"
     local -a best_parts=(${best_ver})
     IFS=' '
 

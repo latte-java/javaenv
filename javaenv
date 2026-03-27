@@ -72,6 +72,7 @@ resolve_latest_major() {
   echo "${version}"
 }
 
+# NOTE: this function is duplicated in the shim template in cmd_reshim() — keep in sync
 resolve_major_to_installed() {
   local major="$1"
   local best=""
@@ -177,6 +178,10 @@ cmd_install() {
 
   # If version has no dots, treat as major version — resolve to latest GA
   if [[ "${version}" != *.* ]]; then
+    if [[ ! "${version}" =~ ^[0-9]+$ ]]; then
+      echo "Error: Invalid version '${version}'. Use a major version (e.g., 21) or full version (e.g., 21.0.7+6)" >&2
+      exit 1
+    fi
     echo "Resolving latest JDK ${version}..."
     version="$(resolve_latest_major "${version}")"
     echo "Latest version: ${version}"
@@ -368,6 +373,7 @@ resolve_version() {
   fi
 }
 
+# NOTE: keep in sync with resolve_major_to_installed() in the main script
 resolve_major_to_installed() {
   local major="$1"
   local best=""

@@ -337,6 +337,47 @@ resolve_version() {
   fi
 }
 
+resolve_major_to_installed() {
+  local major="$1"
+  local best=""
+
+  for dir in "${JAVAENV_JAVA_DIR}"/*/; do
+    [[ -d "${dir}" ]] || continue
+    local name
+    name="$(basename "${dir}")"
+    local ver="${name#"${name%%[0-9]*}"}"
+    local dir_major="${ver%%.*}"
+    if [[ "${dir_major}" != "${major}" ]]; then
+      continue
+    fi
+
+    if [[ -z "${best}" ]]; then
+      best="${name}"
+      continue
+    fi
+
+    local IFS='.+'
+    local -a cur_parts=(${ver})
+    local best_ver="${best#"${best%%[0-9]*}"}"
+    local -a best_parts=(${best_ver})
+    IFS=' '
+
+    local i
+    for ((i = 0; i < ${#cur_parts[@]}; i++)); do
+      local cur_seg="${cur_parts[$i]:-0}"
+      local best_seg="${best_parts[$i]:-0}"
+      if (( cur_seg > best_seg )); then
+        best="${name}"
+        break
+      elif (( cur_seg < best_seg )); then
+        break
+      fi
+    done
+  done
+
+  echo "${best}"
+}
+
 version="$(resolve_version)"
 if [[ -z "${version}" ]]; then
   echo "javaenv: no .javaversion file found in directory hierarchy or ~/.javaversion" >&2
@@ -344,6 +385,17 @@ if [[ -z "${version}" ]]; then
 fi
 
 version="$(echo "${version}" | tr -d '[:space:]')"
+
+# If version has no dots, resolve to highest installed major match
+if [[ "${version}" != *.* ]]; then
+  resolved="$(resolve_major_to_installed "${version}")"
+  if [[ -z "${resolved}" ]]; then
+    echo "javaenv: no JDK ${version}.x installed. Run: javaenv install ${version}" >&2
+    exit 1
+  fi
+  version="${resolved}"
+fi
+
 exe_name="$(basename "$0")"
 exe_path="${JAVAENV_JAVA_DIR}/${version}/bin/${exe_name}"
 

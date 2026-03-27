@@ -449,7 +449,7 @@ usage() {
 Usage: javaenv <command> [args]
 
 Commands:
-  install <version>     Install a JDK version (e.g., 17.0.18+8)
+  install <version>     Install a JDK version (e.g., 21 or 21.0.7+6)
   install -l|--list     List available JDK versions from Adoptium
   uninstall <version>   Remove an installed JDK version
   versions              List installed JDK versions
@@ -460,6 +460,7 @@ Commands:
 
 Version is resolved from .javaversion in the current directory
 (searching up), falling back to ~/.javaversion.
+A major version (e.g., 21) resolves to the latest installed patch.
 EOF
 }
 

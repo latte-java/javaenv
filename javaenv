@@ -463,6 +463,144 @@ INIT
   esac
 }
 
+cmd_doctor() {
+  local issues=0
+
+  echo "javaenv doctor"
+  echo "=============="
+  echo ""
+
+  # Check javaenv is in PATH
+  if command -v javaenv &>/dev/null; then
+    echo "[OK] javaenv found at $(command -v javaenv)"
+  else
+    echo "[ERROR] javaenv is not in PATH"
+    issues=$((issues + 1))
+  fi
+
+  # Check shim directory exists
+  if [[ -d "${JAVAENV_SHIM_DIR}" ]]; then
+    echo "[OK] Shim directory exists (${JAVAENV_SHIM_DIR})"
+  else
+    echo "[ERROR] Shim directory missing (${JAVAENV_SHIM_DIR})"
+    echo "  Run: javaenv reshim"
+    issues=$((issues + 1))
+  fi
+
+  # Check shim directory is in PATH
+  if [[ ":${PATH}:" == *":${JAVAENV_SHIM_DIR}:"* ]]; then
+    echo "[OK] Shim directory is in PATH"
+  else
+    echo "[ERROR] Shim directory (${JAVAENV_SHIM_DIR}) is not in PATH"
+    echo "  Add ${JAVAENV_SHIM_DIR} to your PATH"
+    issues=$((issues + 1))
+  fi
+
+  # Check shims exist
+  if [[ -x "${JAVAENV_SHIM_DIR}/java" ]]; then
+    echo "[OK] Java shim exists"
+  else
+    echo "[ERROR] Java shim not found at ${JAVAENV_SHIM_DIR}/java"
+    echo "  Run: javaenv reshim"
+    issues=$((issues + 1))
+  fi
+
+  # Check shims come before system java in PATH
+  local java_path
+  java_path="$(command -v java 2>/dev/null || true)"
+  if [[ -n "${java_path}" ]]; then
+    if [[ "${java_path}" == "${JAVAENV_SHIM_DIR}/java" ]]; then
+      echo "[OK] javaenv shim is first java in PATH"
+    else
+      echo "[WARN] java resolves to ${java_path} (not the javaenv shim)"
+      echo "  Ensure ${JAVAENV_SHIM_DIR} appears before $(dirname "${java_path}") in PATH"
+      issues=$((issues + 1))
+    fi
+  else
+    echo "[WARN] No java found in PATH"
+  fi
+
+  # Check java directory exists
+  if [[ -d "${JAVAENV_JAVA_DIR}" ]]; then
+    local version_count
+    version_count=$(find "${JAVAENV_JAVA_DIR}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+    echo "[OK] Java directory exists with ${version_count} version(s) installed"
+  else
+    echo "[WARN] Java directory missing (${JAVAENV_JAVA_DIR})"
+    echo "  Run: javaenv install <version>"
+  fi
+
+  # Check version resolution
+  local version
+  version="$(resolve_version)"
+  if [[ -n "${version}" ]]; then
+    local source="unknown"
+    if [[ -n "${JAVAENV_VERSION:-}" ]]; then
+      source="JAVAENV_VERSION"
+    elif [[ -f ".javaversion" ]]; then
+      source=".javaversion"
+    elif [[ -f "${HOME}/.javaversion" ]]; then
+      source="~/.javaversion"
+    fi
+    echo "[OK] Version ${version} resolved from ${source}"
+
+    # Check if resolved version is actually installed
+    version="$(echo "${version}" | tr -d '[:space:]')"
+    if [[ "${version}" != *.* ]]; then
+      local resolved
+      resolved="$(resolve_major_to_installed "${version}")"
+      if [[ -n "${resolved}" ]]; then
+        echo "[OK] Major version ${version} resolves to installed ${resolved}"
+      else
+        echo "[ERROR] No installed JDK matches major version ${version}"
+        echo "  Run: javaenv install ${version}"
+        issues=$((issues + 1))
+      fi
+    else
+      if [[ -d "${JAVAENV_JAVA_DIR}/${version}" ]]; then
+        echo "[OK] JDK ${version} is installed"
+      else
+        echo "[ERROR] JDK ${version} is not installed"
+        echo "  Run: javaenv install ${version}"
+        issues=$((issues + 1))
+      fi
+    fi
+  else
+    echo "[WARN] No Java version configured"
+    echo "  Run: javaenv global <version>"
+  fi
+
+  # Check JAVA_HOME
+  if [[ -n "${JAVA_HOME:-}" ]]; then
+    if [[ -d "${JAVA_HOME}" ]]; then
+      local expected_home
+      expected_home="$(cmd_home 2>/dev/null || true)"
+      if [[ -n "${expected_home}" && "${JAVA_HOME}" == "${expected_home}" ]]; then
+        echo "[OK] JAVA_HOME is set correctly (${JAVA_HOME})"
+      elif [[ -n "${expected_home}" ]]; then
+        echo "[WARN] JAVA_HOME (${JAVA_HOME}) does not match javaenv home (${expected_home})"
+        echo "  Add eval \"\$(javaenv init)\" to your shell profile"
+        issues=$((issues + 1))
+      else
+        echo "[WARN] JAVA_HOME is set (${JAVA_HOME}) but javaenv cannot determine expected value"
+      fi
+    else
+      echo "[ERROR] JAVA_HOME is set to a non-existent directory: ${JAVA_HOME}"
+      issues=$((issues + 1))
+    fi
+  else
+    echo "[WARN] JAVA_HOME is not set"
+    echo "  Add eval \"\$(javaenv init)\" to your shell profile"
+  fi
+
+  echo ""
+  if [[ ${issues} -eq 0 ]]; then
+    echo "No issues found."
+  else
+    echo "${issues} issue(s) found."
+  fi
+}
+
 cmd_reshim() {
   mkdir -p "${JAVAENV_SHIM_DIR}"
 
@@ -595,6 +733,7 @@ Commands:
   versions              List installed JDK versions
   current               Show the currently active JDK version
   home                  Print JAVA_HOME for the current version
+  doctor                Diagnose common setup problems
   reshim                Regenerate shims in ~/.local/bin
   help                  Show this help message
 
@@ -668,6 +807,9 @@ main() {
       ;;
     init)
       cmd_init "${1:-}"
+      ;;
+    doctor)
+      cmd_doctor
       ;;
     reshim)
       cmd_reshim

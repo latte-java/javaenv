@@ -45,6 +45,33 @@ detect_arch() {
   esac
 }
 
+resolve_latest_major() {
+  local major="$1"
+  local os arch api_url json version
+  os="$(detect_os)"
+  arch="$(detect_arch)"
+
+  local next_major=$((major + 1))
+  api_url="https://api.adoptium.net/v3/info/release_versions?page_size=1&release_type=ga&vendor=eclipse&os=${os}&architecture=${arch}&image_type=jdk&sort_order=DESC&version=%5B${major},${next_major})"
+
+  if ! json="$(curl -fsSL "${api_url}")"; then
+    echo "Error: Failed to query Adoptium API for JDK ${major}" >&2
+    exit 1
+  fi
+
+  # Extract version: build, major, minor, security from first result
+  version="$(echo "${json}" \
+    | tr -d ' \n' \
+    | sed 's/.*"build":\([0-9]*\),.*"major":\([0-9]*\),"minor":\([0-9]*\),.*"security":\([0-9]*\).*/\2.\3.\4+\1/')"
+
+  if [[ -z "${version}" || "${version}" == "${json}" ]]; then
+    echo "Error: No GA release found for JDK ${major}" >&2
+    exit 1
+  fi
+
+  echo "${version}"
+}
+
 cmd_install_list() {
   local os arch
   os="$(detect_os)"

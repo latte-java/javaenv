@@ -258,7 +258,12 @@ cmd_versions() {
   fi
 
   local current
-  current="$(resolve_version)"
+  current="$(resolve_version | tr -d '[:space:]')"
+
+  # Resolve major-only to installed for comparison
+  if [[ -n "${current}" && "${current}" != *.* ]]; then
+    current="$(resolve_major_to_installed "${current}")"
+  fi
 
   for dir in "${JAVAENV_JAVA_DIR}"/*/; do
     [[ -d "${dir}" ]] || continue
@@ -281,6 +286,19 @@ cmd_current() {
     exit 1
   fi
 
+  version="$(echo "${version}" | tr -d '[:space:]')"
+
+  # Resolve major-only version to installed
+  if [[ "${version}" != *.* ]]; then
+    local resolved
+    resolved="$(resolve_major_to_installed "${version}")"
+    if [[ -z "${resolved}" ]]; then
+      echo "No JDK ${version}.x installed. Run: javaenv install ${version}" >&2
+      exit 1
+    fi
+    version="${resolved}"
+  fi
+
   local dest="${JAVAENV_JAVA_DIR}/${version}"
   if [[ ! -d "${dest}" ]]; then
     echo "JDK ${version} is not installed. Run: javaenv install ${version}" >&2
@@ -297,6 +315,19 @@ cmd_home() {
   if [[ -z "${version}" ]]; then
     echo "No Java version set. Create .javaversion or ~/.javaversion" >&2
     exit 1
+  fi
+
+  version="$(echo "${version}" | tr -d '[:space:]')"
+
+  # Resolve major-only version to installed
+  if [[ "${version}" != *.* ]]; then
+    local resolved
+    resolved="$(resolve_major_to_installed "${version}")"
+    if [[ -z "${resolved}" ]]; then
+      echo "No JDK ${version}.x installed. Run: javaenv install ${version}" >&2
+      exit 1
+    fi
+    version="${resolved}"
   fi
 
   echo "${JAVAENV_JAVA_DIR}/${version}"

@@ -376,6 +376,34 @@ cmd_local() {
   echo "Local Java version set to ${version} ($(pwd)/.javaversion)"
 }
 
+cmd_init() {
+  local shell_name="${1:-}"
+
+  # Auto-detect shell from SHELL env var if not specified
+  if [[ -z "${shell_name}" ]]; then
+    shell_name="$(basename "${SHELL:-bash}")"
+  fi
+
+  case "${shell_name}" in
+    bash|zsh)
+      cat <<'INIT'
+export JAVA_HOME="$(javaenv home 2>/dev/null)"
+INIT
+      ;;
+    fish)
+      cat <<'INIT'
+if set -l jhome (javaenv home 2>/dev/null)
+  set -gx JAVA_HOME $jhome
+end
+INIT
+      ;;
+    *)
+      echo "Error: Unsupported shell '${shell_name}'. Supported: bash, zsh, fish" >&2
+      exit 1
+      ;;
+  esac
+}
+
 cmd_reshim() {
   mkdir -p "${JAVAENV_SHIM_DIR}"
 
@@ -498,6 +526,7 @@ Commands:
   uninstall <version>   Remove an installed JDK version
   global <version>      Set the global Java version (~/.javaversion)
   local <version>       Set the local Java version (./.javaversion)
+  init [shell]          Output shell code to set JAVA_HOME (bash/zsh/fish)
   versions              List installed JDK versions
   current               Show the currently active JDK version
   home                  Print JAVA_HOME for the current version
@@ -562,6 +591,9 @@ main() {
       ;;
     home)
       cmd_home
+      ;;
+    init)
+      cmd_init "${1:-}"
       ;;
     reshim)
       cmd_reshim

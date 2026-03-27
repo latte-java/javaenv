@@ -22,6 +22,9 @@ javaenv install --list
 # Set the global Java version
 javaenv global 21
 
+# Set the local Java version for the current directory
+javaenv local 21
+
 # Show the currently active version
 javaenv current
 

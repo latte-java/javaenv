@@ -72,6 +72,59 @@ resolve_latest_major() {
   echo "${version}"
 }
 
+resolve_major_to_installed() {
+  local major="$1"
+  local best=""
+  local best_parts=()
+
+  for dir in "${JAVAENV_JAVA_DIR}"/*/; do
+    [[ -d "${dir}" ]] || continue
+    local name
+    name="$(basename "${dir}")"
+
+    # Strip any non-numeric prefix (e.g., "jdk-")
+    local ver="${name#"${name%%[0-9]*}"}"
+
+    # Check if this version starts with the requested major
+    local dir_major="${ver%%.*}"
+    if [[ "${dir_major}" != "${major}" ]]; then
+      continue
+    fi
+
+    # Compare version segments to find the highest
+    if [[ -z "${best}" ]]; then
+      best="${name}"
+      continue
+    fi
+
+    # Split both versions on . and + for numeric comparison
+    local IFS='.+'
+    local -a cur_parts=(${ver})
+    local -a best_ver="${best#"${best%%[0-9]*}"}"
+    local -a best_parts=(${best_ver})
+    IFS=' '
+
+    local i
+    for ((i = 0; i < ${#cur_parts[@]}; i++)); do
+      local cur_seg="${cur_parts[$i]:-0}"
+      local best_seg="${best_parts[$i]:-0}"
+      if (( cur_seg > best_seg )); then
+        best="${name}"
+        break
+      elif (( cur_seg < best_seg )); then
+        break
+      fi
+    done
+  done
+
+  if [[ -z "${best}" ]]; then
+    echo ""
+    return
+  fi
+
+  echo "${best}"
+}
+
 cmd_install_list() {
   local os arch
   os="$(detect_os)"

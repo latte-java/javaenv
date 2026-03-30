@@ -4,7 +4,7 @@ Java environment scripts to install and use different versions of Java similar t
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/latte-java/javaenv/main/install | bash
+curl -fsSL https://lattejava.org/javaenv/install | bash
 ```
 
 ## Usage

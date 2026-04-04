@@ -127,6 +127,39 @@ resolve_major_to_installed() {
   echo "${best}"
 }
 
+update_latte_config() {
+  local config_dir="${HOME}/.config/latte/plugins"
+  local config_file="${config_dir}/org.lattejava.plugin.java.properties"
+
+  mkdir -p "${config_dir}"
+
+  # Collect unique major versions from installed JDKs, resolve each to the highest installed
+  local majors=""
+  for dir in "${JAVAENV_JAVA_DIR}"/*/; do
+    [[ -d "${dir}" ]] || continue
+    local name
+    name="$(basename "${dir}")"
+    local ver="${name#"${name%%[0-9]*}"}"
+    local major="${ver%%.*}"
+    if [[ " ${majors} " != *" ${major} "* ]]; then
+      majors="${majors} ${major}"
+    fi
+  done
+
+  # Write config file sorted by major version
+  local content=""
+  for major in $(echo "${majors}" | tr ' ' '\n' | sort -n); do
+    [[ -z "${major}" ]] && continue
+    local best
+    best="$(resolve_major_to_installed "${major}")"
+    if [[ -n "${best}" ]]; then
+      content="${content}${major}=${JAVAENV_JAVA_DIR}/${best}"$'\n'
+    fi
+  done
+
+  printf '%s' "${content}" > "${config_file}"
+}
+
 cmd_install_list() {
   local os arch
   os="$(detect_os)"
@@ -243,6 +276,39 @@ cmd_install() {
   echo "Installed JDK ${version} to ${dest}"
   trap - EXIT
   rm -rf "${tmp_dir}"
+
+  update_latte_config
+}
+
+cmd_upgrade() {
+  local major="$1"
+
+  if [[ ! "${major}" =~ ^[0-9]+$ ]]; then
+    echo "Error: Invalid major version '${major}'. Use a major version number (e.g., 21)" >&2
+    exit 1
+  fi
+
+  local installed
+  installed="$(resolve_major_to_installed "${major}")"
+  if [[ -z "${installed}" ]]; then
+    echo "No JDK ${major}.x installed. Run: javaenv install ${major}" >&2
+    exit 1
+  fi
+
+  local installed_ver="${installed#"${installed%%[0-9]*}"}"
+  echo "Installed: ${installed_ver}"
+
+  echo "Checking for updates..."
+  local latest
+  latest="$(resolve_latest_major "${major}")"
+  echo "Latest:    ${latest}"
+
+  if [[ "${installed_ver}" == "${latest}" ]]; then
+    echo "Already up to date."
+    return 0
+  fi
+
+  cmd_install "${latest}"
 }
 
 cmd_uninstall() {
@@ -256,6 +322,8 @@ cmd_uninstall() {
 
   rm -rf "${dest}"
   echo "Uninstalled JDK ${version}"
+
+  update_latte_config
 }
 
 cmd_versions() {
@@ -724,6 +792,7 @@ Usage: javaenv <command> [args]
 Commands:
   install <version>     Install a JDK version (e.g., 21 or 21.0.7+6)
   install -l|--list     List available JDK versions from Adoptium
+  upgrade <major>       Upgrade an installed JDK to the latest patch
   uninstall <version>   Remove an installed JDK version
   global <version>      Set the global Java version (~/.javaversion)
   local <version>       Set the local Java version (./.javaversion)
@@ -765,6 +834,13 @@ main() {
         cmd_install "$1"
         cmd_reshim
       fi
+      ;;
+    upgrade)
+      if [[ $# -lt 1 ]]; then
+        echo "Usage: javaenv upgrade <major>" >&2
+        exit 1
+      fi
+      cmd_upgrade "$1"
       ;;
     uninstall)
       if [[ $# -lt 1 ]]; then

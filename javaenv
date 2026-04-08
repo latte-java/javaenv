@@ -16,12 +16,18 @@ SHIM_EXECUTABLES=(
 resolve_version() {
   if [[ -n "${JAVAENV_VERSION:-}" ]]; then
     echo "${JAVAENV_VERSION}"
-  elif [[ -f ".javaversion" ]]; then
-    cat ".javaversion"
-  elif [[ -f "${HOME}/.javaversion" ]]; then
+    return
+  fi
+  local dir="$PWD"
+  while [[ "${dir}" != "" ]]; do
+    if [[ -f "${dir}/.javaversion" ]]; then
+      cat "${dir}/.javaversion"
+      return
+    fi
+    dir="${dir%/*}"
+  done
+  if [[ -f "${HOME}/.javaversion" ]]; then
     cat "${HOME}/.javaversion"
-  else
-    echo ""
   fi
 }
 
@@ -605,10 +611,18 @@ cmd_doctor() {
     local source="unknown"
     if [[ -n "${JAVAENV_VERSION:-}" ]]; then
       source="JAVAENV_VERSION"
-    elif [[ -f ".javaversion" ]]; then
-      source=".javaversion"
-    elif [[ -f "${HOME}/.javaversion" ]]; then
-      source="~/.javaversion"
+    else
+      local search_dir="$PWD"
+      while [[ "${search_dir}" != "" ]]; do
+        if [[ -f "${search_dir}/.javaversion" ]]; then
+          source="${search_dir}/.javaversion"
+          break
+        fi
+        search_dir="${search_dir%/*}"
+      done
+      if [[ "${source}" == "unknown" && -f "${HOME}/.javaversion" ]]; then
+        source="~/.javaversion"
+      fi
     fi
     echo "[OK] Version ${version} resolved from ${source}"
 

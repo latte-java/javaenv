@@ -19,7 +19,7 @@ resolve_version() {
     return
   fi
   local dir="$PWD"
-  while [[ "${dir}" != "" ]]; do
+  while [[ "${dir}" != "" && "${dir}" != "${HOME}" ]]; do
     if [[ -f "${dir}/.javaversion" ]]; then
       cat "${dir}/.javaversion"
       return
@@ -710,7 +710,7 @@ resolve_version() {
     return
   fi
   local dir="$PWD"
-  while [[ "${dir}" != "" ]]; do
+  while [[ "${dir}" != "" && "${dir}" != "${HOME}" ]]; do
     if [[ -f "${dir}/.javaversion" ]]; then
       cat "${dir}/.javaversion"
       return
